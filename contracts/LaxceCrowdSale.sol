@@ -34,23 +34,14 @@ abstract contract Crowdsale is Initializable {
     // Amount of usdt raised
     uint256 public usdtRaised;
 
-    struct UserInfo {
-        uint256 usdtContributed;
-        uint256 laxceRecieved;
-    }
-
-    mapping(address => UserInfo) public users;
-
     /**
      * Event for token purchase logging
      * @param purchaser who paid for the tokens
-     * @param beneficiary who got the tokens
      * @param value usdts paid for purchase
      * @param amount amount of tokens purchased
      */
     event TokenPurchase(
         address indexed purchaser,
-        address indexed beneficiary,
         uint256 value,
         uint256 amount
     );
@@ -76,10 +67,9 @@ abstract contract Crowdsale is Initializable {
 
     /**
      * @dev low level token purchase ***DO NOT OVERRIDE***
-     * @param _beneficiary Address performing the token purchase
      */
-    function buyTokens(address _beneficiary, uint256 usdtAmount) internal {
-        _preValidatePurchase(_beneficiary, usdtAmount);
+    function _buyTokens(uint256 usdtAmount) internal {
+        _preValidatePurchase(usdtAmount);
         usdtToken.safeTransferFrom(msg.sender, address(this), usdtAmount);
         // calculate token amount to be created
         uint256 tokens = _getTokenAmount(usdtAmount);
@@ -87,13 +77,9 @@ abstract contract Crowdsale is Initializable {
         // update state
         usdtRaised = usdtRaised + usdtAmount;
 
-        UserInfo storage user = users[_beneficiary];
-        user.usdtContributed += usdtAmount;
-        user.laxceRecieved += tokens;
+        _processPurchase(tokens);
 
-        _processPurchase(msg.sender, tokens);
-
-        emit TokenPurchase(msg.sender, _beneficiary, usdtAmount, tokens);
+        emit TokenPurchase(msg.sender, usdtAmount, tokens);
     }
 
     // -----------------------------------------
@@ -102,39 +88,32 @@ abstract contract Crowdsale is Initializable {
 
     /**
      * @dev Validation of an incoming purchase. Use require statements to revert state when conditions are not met. Use super to concatenate validations.
-     * @param _beneficiary Address performing the token purchase
      * @param _usdtAmount Value in usdt involved in the purchase
      */
     function _preValidatePurchase(
-        address _beneficiary,
         uint256 _usdtAmount
     ) internal virtual {
-        require(_beneficiary != address(0), "Address cant be zero address");
         require(_usdtAmount != 0, "Amount cant be 0");
     }
 
     /**
      * @dev Source of tokens. Override this method to modify the way in which the crowdsale ultimately gets and sends its tokens.
-     * @param _beneficiary Address performing the token purchase
      * @param _tokenAmount Number of tokens to be emitted
      */
     function _deliverTokens(
-        address _beneficiary,
         uint256 _tokenAmount
     ) internal {
-        rewardToken.transfer(_beneficiary, _tokenAmount);
+        rewardToken.safeTransfer(msg.sender, _tokenAmount);
     }
 
     /**
      * @dev Executed when a purchase has been validated and is ready to be executed. Not necessarily emits/sends tokens.
-     * @param _beneficiary Address receiving the tokens
      * @param _tokenAmount Number of tokens to be purchased
      */
     function _processPurchase(
-        address _beneficiary,
         uint256 _tokenAmount
     ) internal {
-        _deliverTokens(_beneficiary, _tokenAmount);
+        _deliverTokens(_tokenAmount);
     }
 
     /**
@@ -164,14 +143,6 @@ abstract contract Crowdsale is Initializable {
      */
     function _changeToken(IERC20 newToken) internal virtual {
         rewardToken = newToken;
-    }
-
-    /**
-     * @dev Change Token.
-     * @param updateUsdtToken usdt token
-     */
-    function _changeUsdtToken(IERC20 updateUsdtToken) internal virtual {
-        usdtToken = updateUsdtToken;
     }
 }
 
@@ -212,8 +183,9 @@ contract LaxceCrowdSale is
         __Ownable_init_unchained(msg.sender);
         __Context_init_unchained();
         __ReentrancyGuard_init_unchained();
-        minimumBuyLimit = 5000;
-        maximumBuyLimit = 500000;
+        __UUPSUpgradeable_init();
+        minimumBuyLimit = 5000000000;
+        maximumBuyLimit = 500000000000;
     }
 
     /**
@@ -246,11 +218,10 @@ contract LaxceCrowdSale is
     }
 
     /**
-     * @dev Purchase tokens for a specified beneficiary.
-     * @param _beneficiary The address of the beneficiary.
+     * @dev Purchase tokens for a contributed user.
+     * @param usdtAmount user contribution amount in usdt with decimlal precision.
      */
     function buyToken(
-        address _beneficiary,
         uint256 usdtAmount
     ) external whenNotPaused nonReentrant {
         if (isBlacklistEnabled) {
@@ -267,7 +238,7 @@ contract LaxceCrowdSale is
                 "Purchase amount exceeds maximum limit"
             );
         }
-        buyTokens(_beneficiary, usdtAmount);
+        _buyTokens(usdtAmount);
     }
 
     /**
@@ -293,16 +264,6 @@ contract LaxceCrowdSale is
             "Token: Address cant be zero address"
         );
         _changeToken(newToken);
-    }
-
-    /**
-     * @dev Change the usdt token address.
-     * @param _usdtToken The new token address to be used.
-     */
-    function changeUsdtToken(
-        IERC20 _usdtToken
-    ) external virtual onlyOwner whenNotPaused {
-        _changeUsdtToken(_usdtToken);
     }
 
     /**
